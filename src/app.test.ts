@@ -6,7 +6,7 @@ describe('GET /', () => {
     const res = await request(app).get('/');
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/html/);
-    expect(res.text).toContain('<ul>');
+    expect(res.text).toContain('<table>');
   });
 
   it('includes hidden files when showHidden=true', async () => {

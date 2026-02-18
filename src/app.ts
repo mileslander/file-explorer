@@ -21,6 +21,13 @@ function safePath(relativePath: string): string | null {
    return resolved;
 }
 
+function formatSize(bytes : number): string {
+   if (bytes < 1024) return `${bytes} B`;
+   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`; 
+   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
 // GET /
 app.get('/', (req: Request, res: Response) => {
    let items = fs.readdirSync(ROOT_DIR, { withFileTypes: true });
@@ -32,20 +39,33 @@ app.get('/', (req: Request, res: Response) => {
    
    const checked = showHidden ? 'checked' : '';
 
-   const listItems = items.map(item => {
-      if (item.isDirectory()) {
-         return `<li><a href="/browse?path=${item.name}">${item.name}/</a></li>`;
-      }
-      return `<li>${item.name}</li>`;
-   }).join('\n');
+   const dirs = items.filter(item => item.isDirectory());
+   const files = items.filter(item => item.isFile());
+
+   const dirRows = dirs.map(item => {
+      const stat = fs.statSync(path.join(ROOT_DIR, item.name));
+      const modified = stat.mtime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return `<tr><td><a href="/browse?path=${item.name}">${item.name}/</a></td><td></td><td>${modified}</td></tr>`;
+   });
+
+   const fileRows = files.map(item => {
+      const stat = fs.statSync(path.join(ROOT_DIR, item.name));
+      const size = formatSize(stat.size);       
+      const modified = stat.mtime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return `<tr><td><a href="/file?path=${item.name}">${item.name}</a></td><td>${size}</td><td>${modified}</td></tr>`;
+   });
+
+   const separator = `<tr><td colspan="3"><hr></td></tr>`;
+   const listItems = [...dirRows, separator, ...fileRows].join('\n'); 
 
    const html = `<html>
+      <head><style>td { padding-right: 2rem; }</style></head>
       <body>
          <h1>${ROOT_DIR}</h1>
          <span style="color: grey; cursor: default;">&#11014; Up</span>
          <input type="checkbox" id="showHidden" ${checked}>
          <label for="showHidden">Show hidden files </label>
-         <ul>${listItems}</ul>
+         <table>${listItems}</table>
          <script>
             document.getElementById('showHidden').addEventListener('change', function(){
                const url = new URL(window.location.href);
@@ -87,13 +107,24 @@ app.get('/browse', (req: Request, res: Response) => {
 
    const checked = showHidden ? 'checked' : '';
 
-   const listItems = items.map(item => {
-      const itemPath = path.join(relativePath, item.name);
-      if (item.isDirectory()) {
-         return `<li><a href="/browse?path=${itemPath}">${item.name}/</a></li>`;
-      }
-      return `<li>${item.name}</li>`;
-   }).join('\n');
+   const dirs = items.filter(item => item.isDirectory());
+   const files = items.filter(item => item.isFile());
+
+   const dirRows = dirs.map(item => {
+      const stat = fs.statSync(path.join(dirPath, item.name));
+      const modified = stat.mtime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return `<tr><td><a href="/browse?path=${path.join(relativePath, item.name)}">${item.name}/</a></td><td></td><td>${modified}</td></tr>`;
+   });
+
+   const fileRows = files.map(item => {
+      const stat = fs.statSync(path.join(dirPath, item.name));
+      const size = formatSize(stat.size);       
+      const modified = stat.mtime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return `<tr><td><a href="/file?path=${path.join(relativePath, item.name)}">${item.name}/</a></td><td>${size}</td><td>${modified}</td></tr>`;
+   });
+
+   const separator = `<tr><td colspan="3"><hr></td></tr>`;
+   const listItems = [...dirRows, separator, ...fileRows].join('\n');   
 
    const parentPath = path.dirname(relativePath);
    const upLink = parentPath === '.'
@@ -101,12 +132,13 @@ app.get('/browse', (req: Request, res: Response) => {
       : `<a href="/browse?path=${parentPath}">&#11014; Up</a>`;
 
    const html = `<html>
+      <head><style>td { padding-right: 2rem; }</style></head>
       <body>
          <h1>${dirPath}</h1>
          ${upLink}
          <input type="checkbox" id="showHidden" ${checked}>
          <label for="showHidden">Show hidden files</label>
-         <ul>${listItems}</ul>
+         <table>${listItems}</table>
          <script>
             document.getElementById('showHidden').addEventListener('change', function(){
                const url = new URL(window.location.href);
@@ -124,7 +156,7 @@ app.get('/browse', (req: Request, res: Response) => {
    res.type('text/html').send(html);
 });
 
-// Read a file
+// GET /file
 
 app.get('/file', (req: Request, res: Response) => {
    const filePath = safePath(req.query.path as string || '');
@@ -132,14 +164,18 @@ app.get('/file', (req: Request, res: Response) => {
       res.status(403).json({ error: 'Access denied' });
       return;
    }
-   let content;
+   let buffer;
    try {
-      content = fs.readFileSync(filePath, 'utf-8');
+      buffer = fs.readFileSync(filePath);
    } catch {
-      res.status(404).send('File not found');
+      res.status(404).send('File Not Found')
       return;
    }
-   res.type('text/plain').send(content);
+   if (buffer.includes(0)) {
+      res.status(415).send('Binary File Not Supported')
+      return;
+   }
+   res.type('text/plain').send(buffer.toString('utf-8'))
 });
 
 export default app;
